@@ -477,7 +477,7 @@ def run_hostile(read_list, output_dir, job_data, tool_params):
         if "read2" in r:
             cmd = base_cmd + [r["read1"], "--fastq2", r["read2"]]
         else:
-            cmd = base_cmd + [r["read"],]
+            cmd = base_cmd + [r["read1"],]
 
         with log_path.open('w') as log_hdl:
             subprocess.run(cmd, check=True, stdout=log_hdl)

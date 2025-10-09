@@ -9,12 +9,12 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 Debug = False #shared across functions defined here
 LOG = sys.stderr
-
+Base_url="https://www.bv-brc.org/api/"
 PatricUser = None
 
 def createTSVGet(api_url=None):
     if api_url == None:
-        api_url="https://www.patricbrc.org/api/"
+        api_url=Base_url
     Session = requests.Session()
     Session.headers.update({ 'accept': "text/tsv" })
     Session.headers.update({ "Content-Type": "application/rqlquery+x-www-form-urlencoded" })
@@ -25,7 +25,7 @@ def createTSVGet(api_url=None):
 
 def getHostManifest(api_url=None):
     if api_url is None:
-        api_url = "https://patricbrc.org/api/"
+        api_url = Base_url
     r = requests.get(api_url + "content/host/patric_host_summary.json")
     manifest = r.json()
     return {item["species_taxid"]: item for item in manifest["genomes"]}
