@@ -15,7 +15,7 @@ from contextlib import closing
 from multiprocessing import Process
 from pathlib import Path
 import requests
-
+import pycurl
 from fqutil_api import authenticateByEnv, getHostManifest
 
 # Default bowtie2 threads.
@@ -489,23 +489,53 @@ def get_genome(parameters, host_manifest={}):
     if not os.path.exists(target_file):
         taxid = str(parameters["gid"]).split(".")[0]
         if taxid in host_manifest:
-            # Only the index is needed.
-            # genome_url = host_manifest[taxid]["patric_ftp"] + "_genomic.fna"
-            # print(genome_url)
-            # with closing(request.urlopen(genome_url)) as r:
-            #     with open(target_file, "wb") as f:
-            #         shutil.copyfileobj(r, f)
             index_url = host_manifest[taxid]["patric_ftp"] + "_genomic.ht2.tar"
             index_file = os.path.join(
                 parameters["output_path"], parameters["gid"] + ".ht2.tar"
             )
+            # If index_url starts with ftp://, change to sftp://
+            #if index_url.startswith("ftp://"):
+            #    index_url = "ftps://" + index_url[6:]
+            #    print("Changed index_url to FTPS:", index_url)
+            # If index_url contains patricbrc, replace with bv-brc
+            if "patricbrc.org" in index_url:
+                index_url = index_url.replace("patricbrc.org", "bv-brc.org")
+                print("Changed index_url to bv-brc:", index_url)
             print(index_url)
-            with closing(request.urlopen(index_url)) as r:
-                with open(index_file, "wb") as f:
-                    shutil.copyfileobj(r, f)
+            if index_url.startswith("ftp://"):
+                try:
+                    print(f"Attempting to download via pycurl: {index_url}")
+                    with open(index_file, 'wb') as f:
+                        c = pycurl.Curl()
+                        c.setopt(c.URL, index_url)
+                        c.setopt(c.WRITEDATA, f)
+                        # Tell libcurl to use explicit FTPS
+                        c.setopt(c.USE_SSL, pycurl.USESSL_ALL)
+                        # Tell libcurl to use passive mode, which is required for firewalls
+                        c.setopt(c.FTP_USE_EPSV, 1)
+                        # Set a sane connection timeout
+                        c.setopt(c.CONNECTTIMEOUT, 30)
+                        c.perform()
+                        http_code = c.getinfo(pycurl.HTTP_CODE)
+                        c.close()
+                        if http_code >= 400:
+                            raise Exception(f"pycurl returned HTTP code {http_code}")
+                    print("Download successful with pycurl.")
+                except pycurl.error as e:
+                    print(f"Error downloading file via pycurl: {e}", file=sys.stderr)
+                    sys.exit(1)
+                except Exception as e:
+                    print(f"An error occurred during pycurl download: {e}", file=sys.stderr)
+                    sys.exit(1)
+            else:
+                # Handle HTTP/HTTPS as before
+                with closing(request.urlopen(index_url)) as r:
+                    with open(index_file, "wb") as f:
+                        shutil.copyfileobj(r, f)
+
             genome["hisat_index"] = index_file
         else:
-            # parameters["data_api"], parameters["gid"])
+            # Handle other cases (e.g., API download)
             genome_url = (
                 "{data_api}/genome_sequence/?eq(genome_id,{gid})&limit(25000)".format(
                     **parameters
@@ -521,13 +551,13 @@ def get_genome(parameters, host_manifest={}):
             # pretty_print_POST(prepared)
             s = requests.Session()
             response = s.send(prepared)
-            handle = open(target_file, "wb")
-            if not response.ok:
-                sys.stderr.write("API not responding. Please try again later.\n")
-                sys.exit(2)
-            else:
-                for block in response.iter_content(1024):
-                    handle.write(block)
+            with open(target_file, "wb") as handle:
+                if not response.ok:
+                    sys.stderr.write("API not responding. Please try again later.\n")
+                    sys.exit(2)
+                else:
+                    for block in response.iter_content(1024):
+                        handle.write(block)
     sys.stdout.flush()
     return genome
 
