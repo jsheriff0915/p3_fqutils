@@ -15,8 +15,12 @@ from contextlib import closing
 from multiprocessing import Process
 from pathlib import Path
 import requests
-import pycurl
+# import pycurl
 from fqutil_api import authenticateByEnv, getHostManifest
+
+import sys
+sys.path.append("/home/ac.jsheriff/dev_container/modules/p3_fqutils/lib")
+from host_removal_precomputed_pipeline import run_hostile
 
 # Default bowtie2 threads.
 BT2_THREADS = 2
@@ -451,7 +455,7 @@ def paired_filter(read_list, parameters, output_dir, job_data):
             r["read2"] += ".paired.fq"
     return read_list
 
-def run_hostile(read_list, output_dir, job_data, tool_params):
+def run_host_removal(read_list, output_dir, job_data, tool_params):
     """
     Run Hostile to remove host sequences from short and long read (meta)genomes.
     https://github.com/bede/hostile
@@ -461,26 +465,60 @@ def run_hostile(read_list, output_dir, job_data, tool_params):
 
     # Set the cache dir for the index files
     # See https://github.com/bede/hostile/issues/32
-    cache_dir = output_dir / "hostile"
-    cache_dir.mkdir(exist_ok=True, parents=True)
-    os.environ["HOSTILE_CACHE_DIR"] = str(cache_dir)
-    print(f"{os.environ['HOSTILE_CACHE_DIR']=}", file=sys.stderr)
 
-    log_path = output_dir / "hostile_report.txt"
-    print(f"{log_path=}", file=sys.stderr)
+    # cache_dir = output_dir / "hostile"
+    # cache_dir.mkdir(exist_ok=True, parents=True)
+    # os.environ["HOSTILE_CACHE_DIR"] = str(cache_dir)
+    # print(f"{os.environ['HOSTILE_CACHE_DIR']=}", file=sys.stderr)
 
-    base_cmd = ["hostile", "clean", "--force",
-           "--out-dir", str(output_dir), "--fastq1"]
+    print(read_list)
+    print(job_data)
+    print(tool_params)
 
-    for r in read_list:
-        print(f"{r=}", file=sys.stderr)
-        if "read2" in r:
-            cmd = base_cmd + [r["read1"], "--fastq2", r["read2"]]
-        else:
-            cmd = base_cmd + [r["read1"],]
+    entry = read_list[0]
+    src_dir = Path(entry["read1"]).parent
+    print(src_dir)
 
-        with log_path.open('w') as log_hdl:
-            subprocess.run(cmd, check=True, stdout=log_hdl)
+    # species_common_name = job_data.get("species_common_name")
+    # print(species_common_name)
+
+    # aligner = job_data.get("aligner")
+
+    species_common_name = str("Cow")
+    # print(species_common_name)
+
+    aligner = str("minimap2")
+
+    try:
+        run_hostile(
+            src_dir=str(src_dir),
+            species_common_name=species_common_name,
+            aligner=aligner,
+            out_dir=str(output_dir),
+        )
+        # with log_path.open('w') as log_hdl:
+        #     subprocess.run(cmd, check=True, stdout=log_hdl)
+
+        return {"status": "success"}
+
+    except Exception as e:
+        print(f"Host removal failed for {species_common_name}: {e}", file=sys.stderr)
+        return {"status": "failed", "error": str(e)}
+
+        
+    # log_path = output_dir / "hostile_report.txt"
+    # print(f"{log_path=}", file=sys.stderr)
+
+    # base_cmd = ["hostile", "clean", "--force",
+    #        "--out-dir", str(output_dir), "--fastq1"]
+
+    # for r in read_list:
+    #     print(f"{r=}", file=sys.stderr)
+    #     if "read2" in r:
+    #         cmd = base_cmd + [r["read1"], "--fastq2", r["read2"]]
+    #     else:
+    #         cmd = base_cmd + [r["read1"],]
+
 
 def get_genome(parameters, host_manifest={}):
     target_file = os.path.join(parameters["output_path"], parameters["gid"] + ".fna")
@@ -693,7 +731,7 @@ def run_fq_util(job_data, output_dir, tool_params={}):
         elif step == "ALIGN":
             run_alignment(genome_list, read_list, tool_params, output_dir, job_data)
         elif step == "SCRUB_HUMAN":
-            run_hostile(read_list, output_dir, job_data, tool_params)
+            run_host_removal(read_list, output_dir, job_data, tool_params)
         else:
             print("Skipping step. Not found: {}".format(step), file=sys.stderr)
     if len(recipe) == 1 and recipe[0].upper() == "PAIRED_FILTER":
